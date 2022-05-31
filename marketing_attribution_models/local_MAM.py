@@ -1,5 +1,6 @@
 import itertools
 import math
+from operator import index
 import random
 import re
 import warnings
@@ -10,8 +11,7 @@ import pandas as pd
 import seaborn as sns
 
 plt.style.use("seaborn-white")
-
-
+print("got the local version")
 class MAM:
     """MAM (Marketing Attribution Models) is a class inspired on the R Package.
 
@@ -137,6 +137,10 @@ class MAM:
             )
 
             del t
+
+            # df_temp.to_csv('journey_transaction_map.csv', index = False)
+            df_temp[df_temp['has_transaction']==True][['journey_id', 'transaction_id']].to_csv('journey_transaction_map.csv', index = False)
+        
             return df_temp
 
         def random_mam_data_frame(nrows=50000, conv_rate=0.4):
@@ -232,13 +236,16 @@ class MAM:
             )
 
             if create_journey_id_based_on_conversion:
-
+                
                 df = journey_id_based_on_conversion(
                     df=df,
                     group_id=group_channels_by_id_list,
                     transaction_colname=journey_with_conv_colname,
                 )
                 group_channels_by_id_list = ["journey_id"]
+                       
+
+
 
             # Grouping channels based on group_channels_by_id_list
             ######################################################
@@ -431,13 +438,15 @@ class MAM:
                 self.data_frame["time_till_conv_agg"] = self.time_till_conv.apply(
                     lambda x: self.sep.join([str(value) for value in x])
                 )
-
+        # add merge logic here
+        
         return self.data_frame
 
     def attribution_all_models(
         self,
         model_type="all",
         last_click_non_but_not_this_channel="Direct",
+        last_click_but_only_this_channel="paid",
         time_decay_decay_over_time=0.5,
         time_decay_frequency=128,
         shapley_size=4,
@@ -479,6 +488,11 @@ class MAM:
             # Running attribution_last_click_non
             self.attribution_last_click_non(
                 but_not_this_channel=last_click_non_but_not_this_channel
+            )
+
+            # Running attribution_last_click_non
+            self.attribution_last_click_only(
+                but_only_this_channel=last_click_but_only_this_channel
             )
 
             # Running attribution_first_click
@@ -742,6 +756,28 @@ class MAM:
         else:
             return self._last_click_non[1]
 
+    def last_click_only_journeys(self):
+        """Returns an object that contains Last Click ignoring a specific
+        channel results with journey granularity."""
+        if self._last_click_only is None:
+            warnings.warn(
+                "In order to call this method, attribution_last_click_only method "
+                + "must be called first."
+            )
+        else:
+            return self._last_click_only[0]
+
+    def last_click_only_channels(self):
+        """Returns an object that contains Last Click ignoring a specific
+        channel results with channel granularity."""
+        if self._last_click_non is None:
+            warnings.warn(
+                "In order to call this method, attribution_last_click_non method "
+                + "must be called first."
+            )
+        else:
+            return self._last_click_only[1]
+
     def linear_journeys(self):
         """Returns an object that contains Linear results with journey
         granularity."""
@@ -827,6 +863,9 @@ class MAM:
         channels_value = self.channels.apply(
             lambda channels: np.asarray(([0] * (len(channels) - 1)) + [1])
         )
+
+        channels_value.to_csv('values_last_click.csv')
+
         # multiplying the results with the conversion value
         channels_value = channels_value * self.conversion_value
         # multiplying with the boolean column that indicates whether the conversion
@@ -940,6 +979,7 @@ class MAM:
                     ]
                 )
             )
+            print(channels_series)
 
             # Creating a data_frame where we have the last channel and the
             # conversion values
@@ -964,6 +1004,143 @@ class MAM:
         self._last_click_non = (channels_value, frame)
 
         return self._last_click_non
+
+    def attribution_last_click_only(
+        self, but_only_this_channel="paid", group_by_channels_models=True
+    ):
+        """100% of the credit goes to the most recent channel matching the only parameter; if journey contains none of those,  
+        attribute all revenue to the last channel before converting.
+
+        Parameters:
+        but_only_this_channel =
+            Wildcard match string for channels that will not be overwritten.
+        group_by_channels_models = True by default.
+            Will aggregate the attributed results by each channel on
+            self.group_by_channels_models
+        """
+        model_name = "attribution_last_click_only_" + but_only_this_channel + "_heuristic"
+
+        # lower_channels = [x.lower() for x in self.channels]
+
+        # Results part 1: Column values
+        # Results in the same format as the DF
+
+        self.channels.to_csv('channels.csv')
+        
+        val = []
+        credited_channels = []        
+
+        for journey in self.channels:
+            #journey.append('paid')
+            credit_bool = []
+            if any([i for i in journey if but_only_this_channel in i.lower()]):
+                #paid is in the channels list
+                canais = journey
+                credit_bool = ([1 if i == max([i if but_only_this_channel in canal.lower() else 0
+                            for i, canal in enumerate(canais)])
+                    else 0
+                    for i, canal in enumerate(canais)
+                ])
+                
+            else:
+                credit_bool = ([0] * (len(journey) - 1)) + [1]
+            
+            credited_channel = journey[credit_bool.index(1)]
+            val.append(credit_bool)
+            credited_channels.append(credited_channel)
+
+        print(val)
+        df_dict = {"channel":val}
+        
+        df_temp = pd.DataFrame(df_dict)
+        df_temp['channel'] = df_temp['channel'].apply(lambda x: np.array(x))
+        channels_value = df_temp['channel']
+        '''
+        channels_value = self.channels.apply(
+            lambda canais: np.asarray(
+                [
+                    1
+                    if i
+                    == max([i if but_only_this_channel in canal.lower() else 0 
+                            for i, canal in enumerate(canais)])
+                    else 0
+                    for i, canal in enumerate(canais)
+                ]
+            )
+        )
+        '''
+
+        channels_value.to_csv('values.csv')
+
+        # filter channels_value for those with all zeros?? and (does that mean no purchase)
+        # np.asarray(([0] * (len(channels) - 1)) + [1])
+
+        # multiplying the results with the conversion value
+        channels_value = channels_value * self.conversion_value
+        # multiplying with the boolean column that indicates if the conversion
+        # happened
+        channels_value = channels_value * self.journey_with_conv.apply(int)
+        channels_value = channels_value.apply(lambda values: values.tolist())
+
+        # Adding the results to self.DataFrame
+        self.as_pd_dataframe()
+        self.data_frame[model_name] = channels_value.apply(
+            lambda x: self.sep.join([str(value) for value in x])
+        )
+
+        #self.channels
+
+        # Results part 2: Results
+        if group_by_channels_models:
+            
+            # channels_series
+
+            '''
+            # Selecting the last channel that is not the one chosen
+            channels_series = self.channels.apply(
+                lambda canais: (
+                    canais[-1]
+                    if len([canal for canal in canais if but_only_this_channel in canal.lower()])
+                    == 0
+                    else canais[
+                        max(
+                            [
+                                i
+                                for i, canal in enumerate(canais)
+                                if but_only_this_channel in canal
+                            ]
+                        )
+                    ]
+                )
+            )
+            '''
+            channels_series = credited_channels
+            df_dict = {"channels":credited_channels}
+            frame = pd.DataFrame(df_dict)
+            # Creating a data_frame where we have the last channel and the
+            # conversion values
+            # frame = channels_series.to_frame(name="channels")
+            # multiplying with the boolean column that indicates whether the conversion
+            # happened
+            frame["value"] = self.conversion_value * self.journey_with_conv.apply(int)
+
+            # Grouping by channels and adding the values
+            frame = frame.groupby(["channels"])["value"].sum()
+
+            if isinstance(self.group_by_channels_models, pd.DataFrame):
+                frame = frame.reset_index()
+                frame.columns = ["channels", model_name]
+                self.group_by_channels_models = pd.merge(
+                    self.group_by_channels_models, frame, how="outer", on=["channels"]
+                ).fillna(0)
+            else:
+                self.group_by_channels_models = frame.reset_index()
+                self.group_by_channels_models.columns = ["channels", model_name]
+
+        self._last_click_only = (channels_value, frame)
+
+        return self._last_click_only
+
 
     def attribution_first_click(self, group_by_channels_models=True):
         """The first touchpoint recieves all the credit.

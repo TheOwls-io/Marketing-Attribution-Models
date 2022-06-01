@@ -137,7 +137,7 @@ class MAM:
             )
 
             del t
-
+            df_temp.to_csv('intermediate_dataset.csv', index = False)
             # df_temp.to_csv('journey_transaction_map.csv', index = False)
             df_temp[df_temp['has_transaction']==True][['journey_id', 'transaction_id']].to_csv('journey_transaction_map.csv', index = False)
         
